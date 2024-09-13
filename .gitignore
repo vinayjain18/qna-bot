@@ -1,0 +1,8 @@
+/venv
+/downloads
+/chroma
+not-useful.py
+qna_rag.py
+web_search.py
+.env
+client_secrets.json
