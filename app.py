@@ -156,7 +156,7 @@ def web_search(question):
         "q": question
         })
         headers = {
-        'X-API-KEY': 'fdc1a0026c0e4a0c35101f139bb04e06f08ae569',
+        'X-API-KEY': os.getenv("SERPER_API_KEY"),
         'Content-Type': 'application/json'
         }
         response = requests.request("POST", url, headers=headers, data=payload)
