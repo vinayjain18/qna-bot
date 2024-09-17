@@ -21,6 +21,8 @@ import json
 import requests
 import html
 import shutil
+import signal
+import sys
 
 load_dotenv()
 
@@ -36,6 +38,10 @@ SCOPES = [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email'
 ]
+
+def signal_handler(sig, frame):
+    print('Shutting down gracefully...')
+    sys.exit(0)
 
 @app.route('/')
 def index():
@@ -247,48 +253,57 @@ def process_file():
         return jsonify({"error": "Not connected to Google Drive"}), 401
 
     data = request.get_json()
-    if not data or 'file_id' not in data:
-        return jsonify({"error": "No file_id provided"}), 400
+    if not data or 'file_ids' not in data:
+        return jsonify({"error": "No file_ids provided"}), 400
 
-    file_id = data['file_id']
+    file_ids = data['file_ids']
     
     credentials = Credentials(**session['credentials'])
     drive_service = build('drive', 'v3', credentials=credentials)
 
     try:
-        file_request = drive_service.files().get_media(fileId=file_id)
-        file = io.BytesIO()
-        downloader = MediaIoBaseDownload(file, file_request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-        file.seek(0)
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-            temp_file.write(file.getvalue())
-            temp_file_path = temp_file.name
+        temp_file_paths = []
+        for file_id in file_ids:
+            file_request = drive_service.files().get_media(fileId=file_id)
+            file = io.BytesIO()
+            downloader = MediaIoBaseDownload(file, file_request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+            file.seek(0)
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+                temp_file.write(file.getvalue())
+                temp_file_paths.append(temp_file.name)
         
         CHROMA_PATH = "chroma"
         if os.path.exists(CHROMA_PATH):
             shutil.rmtree(CHROMA_PATH)
 
-        loader = PyPDFLoader(temp_file_path)
-        documents = loader.load()
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=500)
-        chunks = text_splitter.split_documents(documents)
+        all_chunks = []
+        for temp_file_path in temp_file_paths:
+            loader = PyPDFLoader(temp_file_path)
+            documents = loader.load()
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=500)
+            chunks = text_splitter.split_documents(documents)
+            all_chunks.extend(chunks)
+        
         db = Chroma(persist_directory=CHROMA_PATH, embedding_function=OpenAIEmbeddings())
-        db.add_documents(chunks)
+        db.add_documents(all_chunks)
         # db.persist()
         
-        print(f"File processed: {temp_file.name}")
-        return jsonify({"success": True, "file_path": temp_file_path})
+        print(f"Files processed: {temp_file_paths}")
+        return jsonify({"success": True, "file_paths": temp_file_paths})
     except Exception as e:
-        return jsonify({"error": f"Error downloading file: {str(e)}"}), 500
+        return jsonify({"error": f"Error downloading files: {str(e)}"}), 500
     
     finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
+        for temp_file_path in temp_file_paths:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
 
 if __name__ == '__main__':
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # For development only
-    app.run(debug=True)
+    # Register the signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    app.run(debug=True, threaded=False, use_reloader=False)

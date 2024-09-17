@@ -160,6 +160,7 @@
             <h2>Select a File from Google Drive</h2>
             <button id="back-btn" style="display: none;">Back</button>
             <ul id="file-list"></ul>
+            <button id="process-files-btn" onclick="processSelectedFiles()">Process Selected Files</button>
         </div>
     </div>
 
@@ -177,6 +178,7 @@
         let folderHistory = [];
         let selectedFileId = null;
         let isDriveConnected = false;
+        let selectedFileIds = [];
 
         searchModeToggle.addEventListener('change', function() {
             if (this.checked) {
@@ -232,10 +234,17 @@
                             };
                         } else if (file.mimeType === 'application/pdf') {
                             li.onclick = () => {
-                                selectedFileId = file.id;
-                                fileModal.style.display = 'none';
-                                addMessage(`Selected file: ${file.name}`, 'bot-message');
-                                processSelectedFile(file.id, file.name);
+                                // selectedFileId = file.id;
+                                // fileModal.style.display = 'none';
+                                // addMessage(`Selected file: ${file.name}`, 'bot-message');
+                                // processSelectedFile(file.id, file.name);
+                                if (selectedFileIds.includes(file.id)) {
+                                    selectedFileIds = selectedFileIds.filter(id => id !== file.id);
+                                    li.style.backgroundColor = '';
+                                } else {
+                                    selectedFileIds.push(file.id);
+                                    li.style.backgroundColor = '#d3d3d3';
+                                }
                             };
                         }
                         fileList.appendChild(li);
@@ -243,26 +252,34 @@
                 });
         }
 
-        function processSelectedFile(fileId, fileName) {
+        function processSelectedFiles() {
+            if (selectedFileIds.length === 0) {
+                addMessage("Please select at least one file from Google Drive before processing.", 'bot-message');
+                return;
+            }
+
             fetch('/process_file', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ file_id: fileId, file_name: fileName}),
+                // body: JSON.stringify({ file_id: fileId, file_name: fileName}),
+                body: JSON.stringify({ file_ids: selectedFileIds }),
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    addMessage(`File "${fileName}" has been processed successfully.`, 'bot-message');
+                    addMessage(`Files have been processed successfully.`, 'bot-message');
                 } else {
-                    addMessage(`Error processing file "${fileName}": ${data.error}`, 'bot-message');
+                    addMessage(`Error processing file: ${data.error}`, 'bot-message');
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 addMessage(`An error occurred while processing the file "${fileName}".`, 'bot-message');
             });
+
+            fileModal.style.display = 'none';
         }
 
         backBtn.onclick = () => {
